@@ -143,7 +143,31 @@ are then ignored, and an OpenAI key is never sent to your server. Only `LLM_API_
 | `LLM_SYNTH_MODEL`, `LLM_CHAT_MODEL` | `LLM_MODEL` | a different model for query synthesis and for the chat agent; these also override the OpenAI and Anthropic defaults |
 | `LLM_REASONING` | `auto` | `on` sends reasoning effort (and no temperature) for a reasoning model whose name isn't `gpt-5*` / `o*`; `off` never does |
 
+For Ollama, use `LLM_PROVIDER=ollama` instead (next section).
+
 The model needs to support tool calling, since query synthesis forces a tool call. If a model
 answers in plain text instead, the engine uses the first JSON object in the reply. The chat
 agent's live "thinking" ticker shows reasoning text when the server streams it
 (`reasoning_content` or `reasoning` deltas).
+
+### Using Ollama
+
+```ini
+LLM_PROVIDER=ollama
+LLM_MODEL=qwen3:8b        # any model you have pulled; it needs tool support for the chat agent
+```
+
+That talks to a local Ollama at `http://localhost:11434` with no API key, and sends no
+`Authorization` header at all. To reach another machine, Ollama Cloud, or an Ollama behind an
+authenticating proxy, set Ollama's own variables (`LLM_BASE_URL` and `LLM_API_KEY` also work and win):
+
+```ini
+OLLAMA_HOST=https://ollama.com     # or gpu-box:11434, http://10.0.0.5:11434, ...
+OLLAMA_API_KEY=...                 # sent as "Authorization: Bearer ..."; OPENAI_API_KEY never is
+```
+
+Ollama accepts `tool_choice` but does not enforce it, so a model can answer a synthesis request in
+prose instead of calling the tool. With Ollama, query synthesis therefore asks for the tool's input
+as a JSON-schema `response_format`, which Ollama does enforce. `LLM_FORCE_MODE=tool` switches back to
+a forced tool call; `LLM_FORCE_MODE=schema` also works with any other server that supports
+`response_format` (vLLM, LM Studio). Schema forcing needs `LLM_API=chat`, the default.

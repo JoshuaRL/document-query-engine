@@ -1,5 +1,5 @@
 // A thin LLM provider layer so the engine works with Anthropic, OpenAI, or a self-hosted
-// OpenAI-compatible server (Ollama, vLLM, LM Studio, llama.cpp, a gateway). Selection is
+// OpenAI-compatible server (vLLM, LM Studio, llama.cpp, a gateway), or Ollama. Selection is
 // automatic (see settings.ts): LLM_PROVIDER if set, else an LLM_BASE_URL means OpenAI-compatible,
 // else OPENAI_API_KEY means OpenAI, else Anthropic. Callers (synthesis, chat) speak in terms of
 // the helpers below and never touch a vendor SDK directly. Conversation messages are kept opaque
@@ -72,7 +72,13 @@ function anthropic(): Anthropic {
   return anthropicClient;
 }
 function openai(): OpenAI {
-  if (!openaiClient) openaiClient = new OpenAI({ apiKey: settings.apiKey, baseURL: settings.baseURL });
+  if (!openaiClient) {
+    openaiClient = new OpenAI({
+      baseURL: settings.baseURL,
+      // No key (a local Ollama): send no Authorization header at all, rather than a placeholder token.
+      ...(settings.apiKey ? { apiKey: settings.apiKey } : { apiKey: "unused", defaultHeaders: { Authorization: null } }),
+    });
+  }
   return openaiClient;
 }
 
@@ -108,7 +114,7 @@ export async function forceTool(opts: {
     return forceToolChat(
       openai(),
       { ...opts, messages: opts.messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[] },
-      { reasoning: isReasoningModel(opts.model), maxTokens: outputCap(opts.model, max) },
+      { reasoning: isReasoningModel(opts.model), maxTokens: outputCap(opts.model, max), forceMode: settings.forceMode },
     );
   }
 

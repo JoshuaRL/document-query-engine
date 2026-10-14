@@ -130,6 +130,28 @@ describe("forceToolChat", () => {
     expect(msg.tool_calls[0]?.function).toEqual({ name: "emit_plan", arguments: '{"limit":3}' });
   });
 
+  it("in schema mode, sends a JSON-schema response format and no tools, and records a synthetic call", async () => {
+    const { client, sent } = fakeClient({ choices: [{ message: { role: "assistant", content: '{"limit": 4}' } }] });
+    const r = await forceToolChat(client, { system: "s", messages: [], tool, model: "m" }, { reasoning: false, maxTokens: 10, forceMode: "schema" });
+    expect(sent().response_format).toEqual({
+      type: "json_schema",
+      json_schema: { name: "emit_plan", description: "Emit a plan.", schema: tool.schema },
+    });
+    expect(sent()).not.toHaveProperty("tools");
+    expect(sent()).not.toHaveProperty("tool_choice");
+    expect(r.input).toEqual({ limit: 4 });
+    const msg = r.assistant[0] as { tool_calls: { id: string; function: { name: string; arguments: string } }[] };
+    expect(msg.tool_calls[0]?.id).toBe(r.toolCallId);
+    expect(msg.tool_calls[0]?.function).toEqual({ name: "emit_plan", arguments: '{"limit":4}' });
+  });
+
+  it("in schema mode, throws when the reply holds no JSON object", async () => {
+    const { client } = fakeClient({ choices: [{ message: { role: "assistant", content: "sorry" } }] });
+    await expect(
+      forceToolChat(client, { system: "s", messages: [], tool, model: "m" }, { reasoning: false, maxTokens: 10, forceMode: "schema" }),
+    ).rejects.toThrow("JSON object");
+  });
+
   it("throws when there is neither a tool call nor JSON", async () => {
     const { client } = fakeClient({ choices: [{ message: { role: "assistant", content: "I cannot help." } }] });
     await expect(
