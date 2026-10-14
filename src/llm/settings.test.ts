@@ -54,10 +54,10 @@ describe("resolveLlmSettings: self-hosted OpenAI-compatible", () => {
     });
   });
 
-  it("wins over OPENAI_API_KEY, and uses that key when LLM_API_KEY is blank", () => {
+  it("wins over OPENAI_API_KEY, and never sends that key to the custom host", () => {
     const s = resolveLlmSettings(cfg({ LLM_BASE_URL: "http://h/v1", LLM_MODEL: "m", OPENAI_API_KEY: "o" }));
     expect(s.provider).toBe("openai-compatible");
-    expect(s.apiKey).toBe("o");
+    expect(s.apiKey).toBe("not-needed");
   });
 
   it("prefers LLM_API_KEY", () => {

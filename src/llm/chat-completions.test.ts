@@ -159,6 +159,13 @@ describe("ChatStreamAccumulator", () => {
     ]);
   });
 
+  it("keeps a tool name that a server repeats on every chunk", () => {
+    const acc = new ChatStreamAccumulator();
+    acc.add(chunk({ tool_calls: [{ index: 0, id: "a", type: "function", function: { name: "query", arguments: '{"q":' } }] }));
+    acc.add(chunk({ tool_calls: [{ index: 0, function: { name: "query", arguments: '"x"}' } }] }));
+    expect(acc.toolCalls()).toEqual([{ id: "a", type: "function", function: { name: "query", arguments: '{"q":"x"}' } }]);
+  });
+
   it("gives an id-less call a stable synthetic id", () => {
     const acc = new ChatStreamAccumulator();
     acc.add(chunk({ tool_calls: [{ index: 2, function: { name: "query", arguments: "{}" } }] }));

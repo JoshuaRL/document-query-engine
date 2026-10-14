@@ -134,7 +134,7 @@ LLM_MODEL=qwen3:8b                       # whatever name your server lists under
 ```
 
 Setting `LLM_BASE_URL` is enough to select this mode; `ANTHROPIC_API_KEY` and `OPENAI_API_KEY`
-are then ignored (except that `OPENAI_API_KEY` is used as the key if `LLM_API_KEY` is blank).
+are then ignored, and an OpenAI key is never sent to your server. Only `LLM_API_KEY` is.
 
 | Variable | Default | Meaning |
 |---|---|---|

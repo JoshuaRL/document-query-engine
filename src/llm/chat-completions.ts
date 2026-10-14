@@ -122,7 +122,7 @@ export class ChatStreamAccumulator {
     for (const tc of delta.tool_calls ?? []) {
       const cur = this.calls.get(tc.index) ?? { id: "", name: "", args: "" };
       if (tc.id) cur.id = tc.id;
-      if (tc.function?.name) cur.name += tc.function.name;
+      if (tc.function?.name) cur.name = tc.function.name; // assigned, as the OpenAI SDK's own accumulator does
       if (tc.function?.arguments) cur.args += tc.function.arguments;
       this.calls.set(tc.index, cur);
     }
