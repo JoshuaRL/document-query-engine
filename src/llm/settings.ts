@@ -3,11 +3,14 @@
 //
 // Precedence: LLM_PROVIDER if set; else an LLM_BASE_URL means a self-hosted OpenAI-compatible
 // server; else OPENAI_API_KEY means OpenAI; else Anthropic. With none of the LLM_* variables set,
-// the result is exactly the original behaviour.
+// the result is exactly the original behaviour. LLM_PROVIDER=ollama is a preset of the
+// OpenAI-compatible path with Ollama's defaults, its own env vars, and an optional API key.
 
-export type ProviderName = "openai" | "anthropic" | "openai-compatible";
+export type ProviderName = "openai" | "anthropic" | "openai-compatible" | "ollama";
 export type OpenAiApi = "responses" | "chat";
 export type ReasoningMode = "auto" | "on" | "off";
+/** How forceTool gets structured output: a forced tool call, or a JSON-schema response format. */
+export type ForceMode = "tool" | "schema";
 
 export interface LlmConfig {
   llmProvider: string;
@@ -18,8 +21,11 @@ export interface LlmConfig {
   llmChatModel: string;
   llmSynthModel: string;
   llmReasoning: string;
+  llmForceMode: string;
   openaiApiKey: string;
   anthropicApiKey: string;
+  ollamaHost: string;
+  ollamaApiKey: string;
 }
 
 export interface LlmSettings {
@@ -28,9 +34,12 @@ export interface LlmSettings {
   api: OpenAiApi;
   /** Undefined means the SDK default (which for OpenAI still honours OPENAI_BASE_URL). */
   baseURL?: string;
+  /** Empty only for Ollama without a key: the client then sends no Authorization header. */
   apiKey: string;
   models: { synth: string; chat: string };
   reasoning: ReasoningMode;
+  /** Only the Chat Completions path honours "schema"; the Responses and Anthropic paths force a tool. */
+  forceMode: ForceMode;
 }
 
 const DEFAULT_MODELS: Record<"openai" | "anthropic", { synth: string; chat: string }> = {
@@ -46,11 +55,30 @@ function oneOf<T extends string>(name: string, value: string, allowed: readonly 
   throw new Error(`Invalid ${name}="${value}". Use one of: ${allowed.join(", ")}.`);
 }
 
+/**
+ * Ollama's OpenAI-compatible base URL from LLM_BASE_URL or OLLAMA_HOST, in any form Ollama itself
+ * accepts: "http://host:11434/v1", "http://host:11434", "host:11434", or a bind address like
+ * "0.0.0.0", which a client reaches as localhost. Ollama Cloud is "https://ollama.com".
+ */
+export function ollamaBaseUrl(llmBaseUrl: string, ollamaHost: string): string {
+  let url = (llmBaseUrl || ollamaHost).trim() || "http://localhost:11434";
+  if (!/^https?:\/\//i.test(url)) url = `http://${url}`;
+  const parsed = new URL(url);
+  if (parsed.hostname === "0.0.0.0" || parsed.hostname === "[::]") parsed.hostname = "localhost";
+  // OLLAMA_HOST without a port means Ollama's default port, except for an https host such as ollama.com.
+  if (!parsed.port && parsed.protocol === "http:" && !llmBaseUrl.trim()) parsed.port = "11434";
+  const path = parsed.pathname.replace(/\/+$/, "");
+  parsed.pathname = path.endsWith("/v1") ? path : `${path}/v1`;
+  return parsed.toString().replace(/\/$/, "");
+}
+
 export function resolveLlmSettings(cfg: LlmConfig): LlmSettings {
   const baseUrl = cfg.llmBaseUrl.trim().replace(/\/$/, "");
   const inferred: ProviderName = baseUrl ? "openai-compatible" : cfg.openaiApiKey ? "openai" : "anthropic";
-  const provider = oneOf("LLM_PROVIDER", cfg.llmProvider, ["openai", "anthropic", "openai-compatible"], inferred);
+  const provider = oneOf("LLM_PROVIDER", cfg.llmProvider, ["openai", "anthropic", "openai-compatible", "ollama"], inferred);
   const reasoning = oneOf("LLM_REASONING", cfg.llmReasoning, ["auto", "on", "off"], "auto");
+  // Ollama ignores tool_choice, so a forced tool call there is only a request; a schema is enforced.
+  const forceMode = oneOf("LLM_FORCE_MODE", cfg.llmForceMode, ["tool", "schema"], provider === "ollama" ? "schema" : "tool");
 
   const synthOverride = cfg.llmSynthModel || cfg.llmModel;
   const chatOverride = cfg.llmChatModel || cfg.llmModel;
@@ -64,6 +92,7 @@ export function resolveLlmSettings(cfg: LlmConfig): LlmSettings {
       apiKey: cfg.llmApiKey || cfg.anthropicApiKey,
       models: { synth: synthOverride || d.synth, chat: chatOverride || d.chat },
       reasoning,
+      forceMode,
     };
   }
 
@@ -76,6 +105,31 @@ export function resolveLlmSettings(cfg: LlmConfig): LlmSettings {
       apiKey: cfg.llmApiKey || cfg.openaiApiKey,
       models: { synth: synthOverride || d.synth, chat: chatOverride || d.chat },
       reasoning,
+      forceMode,
+    };
+  }
+
+  if (provider === "ollama") {
+    if (!synthOverride || !chatOverride) {
+      throw new Error("LLM_PROVIDER=ollama needs LLM_MODEL, a model you have pulled (see `ollama list`), e.g. qwen3:8b.");
+    }
+    // Ollama implements Chat Completions fully; /v1/responses exists from Ollama 0.13.3, stateless only.
+    const api = oneOf("LLM_API", cfg.llmApi, ["responses", "chat"], "chat");
+    if (api === "responses" && forceMode === "schema") {
+      throw new Error(
+        "Schema forcing (the Ollama default) needs LLM_API=chat. To use LLM_API=responses with Ollama, also set " +
+          "LLM_FORCE_MODE=tool, knowing Ollama does not enforce tool_choice, so a model may answer without calling the tool.",
+      );
+    }
+    return {
+      provider,
+      api,
+      baseURL: ollamaBaseUrl(cfg.llmBaseUrl, cfg.ollamaHost),
+      // A local Ollama needs no key. Ollama Cloud, or a proxy in front of Ollama, takes one as a bearer token.
+      apiKey: cfg.llmApiKey || cfg.ollamaApiKey,
+      models: { synth: synthOverride, chat: chatOverride },
+      reasoning,
+      forceMode,
     };
   }
 
@@ -94,6 +148,7 @@ export function resolveLlmSettings(cfg: LlmConfig): LlmSettings {
     apiKey: cfg.llmApiKey || "not-needed",
     models: { synth: synthOverride, chat: chatOverride },
     reasoning,
+    forceMode,
   };
 }
 
