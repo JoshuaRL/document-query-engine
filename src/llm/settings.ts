@@ -89,8 +89,9 @@ export function resolveLlmSettings(cfg: LlmConfig): LlmSettings {
     // Most self-hosted servers implement Chat Completions; /v1/responses support varies.
     api: oneOf("LLM_API", cfg.llmApi, ["responses", "chat"], "chat"),
     baseURL: baseUrl,
+    // Only LLM_API_KEY: falling back to OPENAI_API_KEY would send a real OpenAI key to another host.
     // Many local servers ignore the key, but the OpenAI SDK refuses an empty one.
-    apiKey: cfg.llmApiKey || cfg.openaiApiKey || "not-needed",
+    apiKey: cfg.llmApiKey || "not-needed",
     models: { synth: synthOverride, chat: chatOverride },
     reasoning,
   };
