@@ -1,11 +1,88 @@
+# The whole workshop stack: MongoDB plus the app, pulled from GHCR (or built from this checkout).
+#
+#   cp .env.example .env              # fill in your keys
+#   docker compose up -d              # MongoDB + the app on http://localhost:3000
+#   docker compose run --rm cli db:init
+#   docker compose run --rm cli ingest -- owner/repo
+#
+# Only MongoDB, for running the app with Bun on your machine:   docker compose up -d mongo
+# Run your own edits in the container:                          docker compose up -d --build
+# Live-sync src/ into the running container as you edit:        docker compose watch
+#
+# Every ${VAR:-default} below can be set in .env (Compose reads it automatically) or the shell.
+
 services:
   mongo:
-    image: mongo:7
-    container_name: dqe-mongo
+    image: mongo:${MONGO_VERSION:-7}
+    container_name: ${MONGO_CONTAINER_NAME:-dqe-mongo}
+    restart: unless-stopped
     ports:
-      - "27017:27017"
+      # For Bun on the host and for MongoDB tools. Loopback only by default; MONGO_BIND=0.0.0.0 to share it.
+      - "${MONGO_BIND:-127.0.0.1}:${MONGO_PORT:-27017}:27017"
     volumes:
       - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  app:
+    # Workshop steps are tagged by branch, e.g. DQE_TAG=step-3-synthesis; "latest" is main.
+    image: ${DQE_IMAGE:-ghcr.io/unblocked/document-query-engine}:${DQE_TAG:-latest}
+    pull_policy: ${DQE_PULL_POLICY:-missing}
+    build: .
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    ports:
+      - "${DQE_BIND:-127.0.0.1}:${DQE_PORT:-3000}:3000"
+    # Everything else in .env (for example LLM provider settings) reaches the app unchanged.
+    env_file:
+      - path: .env
+        required: false
+    environment: &app-env
+      # Inside the stack, MongoDB is the `mongo` service, whatever MONGO_URI says for host use.
+      MONGO_URI: ${DQE_MONGO_URI:-mongodb://mongo:27017}
+      MONGO_DB: ${MONGO_DB:-workshop}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      CALLER_LOGIN: ${CALLER_LOGIN:-}
+      PORT: "3000"
+      NO_OPEN: "1"
+    extra_hosts:
+      # Lets the app reach a model server on the host, e.g. a base URL of http://host.docker.internal:11434/v1.
+      - "host.docker.internal:host-gateway"
+    develop:
+      watch:
+        - action: sync+restart
+          path: ./src
+          target: /app/src
+        - action: rebuild
+          path: package.json
+        - action: rebuild
+          path: bun.lock
+
+  # One-off CLI runs against the same MongoDB: `docker compose run --rm cli <script> [-- args]`.
+  cli:
+    profiles: ["cli"]
+    image: ${DQE_IMAGE:-ghcr.io/unblocked/document-query-engine}:${DQE_TAG:-latest}
+    pull_policy: ${DQE_PULL_POLICY:-missing}
+    build: .
+    depends_on:
+      mongo:
+        condition: service_healthy
+    env_file:
+      - path: .env
+        required: false
+    environment: *app-env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    entrypoint: ["bun", "run"]
+    command: ["db:init"]
 
 volumes:
   mongo-data:

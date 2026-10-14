@@ -63,9 +63,11 @@ cp .env.example .env        # then edit it — see "Your .env" below
 
 **A — Docker (simplest):**
 ```bash
-docker compose up -d        # mongo:7 on localhost:27017
+docker compose up -d mongo  # mongo:7 on localhost:27017
 ```
-The default `MONGO_URI=mongodb://localhost:27017` already points at it.
+The default `MONGO_URI=mongodb://localhost:27017` already points at it. (Plain
+`docker compose up -d` also starts the app in a container; see
+[Run everything in containers](#run-everything-in-containers).)
 
 **B — You already run MongoDB** (locally or in a container): skip Docker. Point
 `MONGO_URI` at your instance and use a dedicated DB name so you don't clash with
@@ -80,8 +82,8 @@ MONGO_DB=dqe_workshop
 or create a free [Atlas](https://www.mongodb.com/cloud/atlas/register) cluster and set
 `MONGO_URI` to its connection string.
 
-> Already have a Mongo container on 27017? Use option B, or change the published port
-> in `docker-compose.yml` and match `MONGO_URI`.
+> Already have a Mongo container on 27017? Use option B, or set `MONGO_PORT=27018` in `.env`
+> and match `MONGO_URI`.
 
 ### 4. Initialize and ingest
 
@@ -98,6 +100,33 @@ bun run serve                    # opens http://localhost:3000 — Query / Chat 
 
 The app runs and the data browses — but the **engine is stubbed**, so a query (or a
 chat question) returns *"not implemented yet."* Building it is the workshop.
+
+## Run everything in containers
+
+Only Docker is needed: no Bun, no `gh`, no local MongoDB. `docker-compose.yml` runs MongoDB and the
+app, whose image is published to GHCR from this repo.
+
+```bash
+cp .env.example .env                         # set GITHUB_TOKEN (gh isn't in the container) and an LLM key
+docker compose up -d                         # MongoDB + the app on http://localhost:3000
+docker compose run --rm cli db:init
+docker compose run --rm cli ingest -- owner/repo
+```
+
+`.env` holds the values; `docker-compose.yml` declares every setting with its default, so anything
+below can go in `.env` or the shell:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `DQE_IMAGE`, `DQE_TAG` | `ghcr.io/unblocked/document-query-engine`, `latest` | the app image; each workshop step is a tag, e.g. `DQE_TAG=step-3-synthesis` |
+| `DQE_PULL_POLICY` | `missing` | `always` to pick up a newer image, `build` to always build this checkout |
+| `DQE_PORT`, `DQE_BIND` | `3000`, `127.0.0.1` | where the UI is published; `DQE_BIND=0.0.0.0` to reach it from other machines |
+| `DQE_MONGO_URI` | `mongodb://mongo:27017` | the app's MongoDB; point it at Atlas to skip the bundled one |
+| `MONGO_VERSION`, `MONGO_PORT`, `MONGO_BIND` | `7`, `27017`, `127.0.0.1` | the bundled MongoDB and its host port |
+
+Your own edits run in the container too: `docker compose up -d --build` builds the image from this
+checkout, and `docker compose watch` syncs `src/` into the running app and restarts it on every save.
+A model server on your machine, such as Ollama, is reachable from the app as `host.docker.internal`.
 
 ## Your `.env`
 

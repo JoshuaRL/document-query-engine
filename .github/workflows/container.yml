@@ -1,0 +1,109 @@
+# Builds the app image, smoke-tests the whole docker-compose stack, and publishes the image to GHCR.
+# Pull requests build and test only; pushes to main, the workshop step branches and v* tags also publish
+# ghcr.io/<owner>/document-query-engine, tagged by branch (main is also "latest") and by version.
+name: container
+
+on:
+  push:
+    branches: [main, "step-*"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: container-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write a test .env
+        run: |
+          cp .env.example .env
+          # No LLM key: the engine is stubbed on main, and the smoke test makes no model calls.
+          echo "CALLER_LOGIN=octocat" >> .env
+
+      - name: Build the app image and start the stack
+        env:
+          DQE_IMAGE: dqe-ci
+          DQE_TAG: ${{ github.sha }}
+        run: docker compose up -d --build --wait --wait-timeout 180
+
+      - name: Initialize the database
+        env:
+          DQE_IMAGE: dqe-ci
+          DQE_TAG: ${{ github.sha }}
+        run: docker compose run --rm cli db:init
+
+      - name: Ingest this repository's recent pull requests and issues
+        env:
+          DQE_IMAGE: dqe-ci
+          DQE_TAG: ${{ github.sha }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: docker compose run --rm cli ingest -- "$GITHUB_REPOSITORY" --max 5
+
+      - name: The UI and the API answer through the published port
+        run: |
+          curl -fsS http://127.0.0.1:3000/ | grep -qi "<html"
+          curl -fsS http://127.0.0.1:3000/api/health
+          curl -fsS http://127.0.0.1:3000/api/stats
+
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs --no-color
+
+      - name: Stop the stack
+        if: always()
+        run: docker compose down -v
+
+  publish:
+    needs: smoke
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Image name (GHCR needs lower case)
+        id: name
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.name.outputs.image }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      # amd64 for Linux and Windows hosts, arm64 for Apple silicon.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

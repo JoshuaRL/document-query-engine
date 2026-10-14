@@ -1,0 +1,14 @@
+# Keep secrets, local state and dev-only files out of the build context and the image.
+.env
+.env.*
+!.env.example
+node_modules
+.git
+.github
+coverage
+dist
+*.log
+*.tsbuildinfo
+.idea
+.vscode
+.DS_Store
