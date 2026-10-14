@@ -8,6 +8,15 @@ export const config = {
   // If set, the engine uses OpenAI instead of Anthropic (see src/llm/provider.ts).
   openaiApiKey: process.env.OPENAI_API_KEY ?? "",
   callerLogin: process.env.CALLER_LOGIN ?? "",
+  // Optional LLM overrides, e.g. for a self-hosted OpenAI-compatible server (see src/llm/settings.ts).
+  llmProvider: process.env.LLM_PROVIDER ?? "", // openai | anthropic | openai-compatible
+  llmBaseUrl: process.env.LLM_BASE_URL ?? "",
+  llmApiKey: process.env.LLM_API_KEY ?? "",
+  llmApi: process.env.LLM_API ?? "", // responses | chat
+  llmModel: process.env.LLM_MODEL ?? "",
+  llmChatModel: process.env.LLM_CHAT_MODEL ?? "",
+  llmSynthModel: process.env.LLM_SYNTH_MODEL ?? "",
+  llmReasoning: process.env.LLM_REASONING ?? "", // auto | on | off
 };
 
 /** Throws if a required env var is missing — call at the top of a CLI that needs it. */

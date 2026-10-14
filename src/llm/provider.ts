@@ -1,33 +1,44 @@
-// A thin LLM provider layer so the engine works with either Anthropic or OpenAI.
-// Selection is automatic: if OPENAI_API_KEY is set, OpenAI is used; otherwise
-// Anthropic. Callers (synthesis, chat) speak in terms of the helpers below and
-// never touch a vendor SDK directly. Conversation messages are kept opaque
+// A thin LLM provider layer so the engine works with Anthropic, OpenAI, or a self-hosted
+// OpenAI-compatible server (Ollama, vLLM, LM Studio, llama.cpp, a gateway). Selection is
+// automatic (see settings.ts): LLM_PROVIDER if set, else an LLM_BASE_URL means OpenAI-compatible,
+// else OPENAI_API_KEY means OpenAI, else Anthropic. Callers (synthesis, chat) speak in terms of
+// the helpers below and never touch a vendor SDK directly. Conversation messages are kept opaque
 // (vendor-shaped) and built via userMessage()/toolResultMessage().
 //
-// OpenAI uses the Responses API (/v1/responses): GPT-5 reasoning models don't
-// support function tools on chat-completions. Anthropic uses the Messages API.
+// The OpenAI path speaks one of two wire APIs, chosen by LLM_API. "responses" (/v1/responses) is
+// the default for OpenAI itself: GPT-5 reasoning models don't support function tools on
+// chat-completions. "chat" (/v1/chat/completions, see chat-completions.ts) is the default for a
+// self-hosted server, since that is the API they implement fully. Anthropic uses the Messages API.
 import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
 import { config } from "../config.js";
+import { chatToolResultMessage, forceToolChat, streamChatTurnChat } from "./chat-completions.js";
+import { isReasoningModel as reasoningFor, resolveLlmSettings, type ProviderName } from "./settings.js";
 
-export type ProviderName = "openai" | "anthropic";
+export type { ProviderName };
 
-/** OpenAI wins when its key is present, else Anthropic. */
-export const provider: ProviderName = config.openaiApiKey ? "openai" : "anthropic";
+const settings = resolveLlmSettings(config);
 
-/** Default models per provider. */
-export const MODELS =
-  provider === "openai"
-    ? { synth: "gpt-5.4-mini", chat: "gpt-5.4-mini" }
-    : { synth: "claude-haiku-4-5-20251001", chat: "claude-sonnet-4-6" };
+export const provider: ProviderName = settings.provider;
+
+/** Models per provider: built-in defaults for OpenAI and Anthropic, overridable via LLM_*MODEL. */
+export const MODELS = settings.models;
+
+/** True for the OpenAI-shaped providers (OpenAI itself and self-hosted compatibles). */
+const openaiShaped = provider !== "anthropic";
+/** Chat Completions instead of the Responses API. */
+const useChat = openaiShaped && settings.api === "chat";
 
 /** GPT-5 / o-series are reasoning models — they take a `reasoning` effort and ignore temperature. */
-const isReasoningModel = (model: string): boolean => /^(gpt-5|o\d)/.test(model);
+const isReasoningModel = (model: string): boolean => reasoningFor(model, settings.reasoning);
 /** Reasoning models spend output tokens on hidden reasoning, so give responses headroom. */
 const outputCap = (model: string, want: number): number => (isReasoningModel(model) ? Math.max(want, 4096) : want);
 
 /** An opaque, vendor-shaped conversation message. Build via the helpers; don't inspect. */
-export type LlmMessage = Anthropic.MessageParam | OpenAI.Responses.ResponseInputItem;
+export type LlmMessage =
+  | Anthropic.MessageParam
+  | OpenAI.Responses.ResponseInputItem
+  | OpenAI.Chat.Completions.ChatCompletionMessageParam;
 
 /** A tool the model may call. `schema` is a JSON Schema for the tool's input. */
 export interface ToolSpec {
@@ -57,11 +68,11 @@ export interface ChatTurnResult {
 let anthropicClient: Anthropic | undefined;
 let openaiClient: OpenAI | undefined;
 function anthropic(): Anthropic {
-  if (!anthropicClient) anthropicClient = new Anthropic({ apiKey: config.anthropicApiKey });
+  if (!anthropicClient) anthropicClient = new Anthropic({ apiKey: settings.apiKey, baseURL: settings.baseURL });
   return anthropicClient;
 }
 function openai(): OpenAI {
-  if (!openaiClient) openaiClient = new OpenAI({ apiKey: config.openaiApiKey });
+  if (!openaiClient) openaiClient = new OpenAI({ apiKey: settings.apiKey, baseURL: settings.baseURL });
   return openaiClient;
 }
 
@@ -72,7 +83,8 @@ export function userMessage(text: string): LlmMessage {
 
 /** A tool result to feed back to the model (set isError for validation/runtime failures). */
 export function toolResultMessage(toolCallId: string, content: string, isError = false): LlmMessage {
-  if (provider === "openai") {
+  if (useChat) return chatToolResultMessage(toolCallId, content, isError);
+  if (openaiShaped) {
     return { type: "function_call_output", call_id: toolCallId, output: content };
   }
   return { role: "user", content: [{ type: "tool_result", tool_use_id: toolCallId, content, is_error: isError }] };
@@ -92,7 +104,15 @@ export async function forceTool(opts: {
 }): Promise<ForcedToolResult> {
   const max = opts.maxTokens ?? 1024;
 
-  if (provider === "openai") {
+  if (useChat) {
+    return forceToolChat(
+      openai(),
+      { ...opts, messages: opts.messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[] },
+      { reasoning: isReasoningModel(opts.model), maxTokens: outputCap(opts.model, max) },
+    );
+  }
+
+  if (openaiShaped) {
     const res = await openai().responses.create({
       model: opts.model,
       instructions: opts.system,
@@ -135,7 +155,16 @@ export async function* streamChatTurn(opts: {
   model: string;
   maxTokens: number;
 }): AsyncGenerator<{ type: "thinking"; text: string }, ChatTurnResult, void> {
-  if (provider === "openai") {
+  if (useChat) {
+    // yield* forwards the thinking chunks and evaluates to the generator's return value.
+    return yield* streamChatTurnChat(
+      openai(),
+      { ...opts, messages: opts.messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[] },
+      { reasoning: isReasoningModel(opts.model), maxTokens: outputCap(opts.model, opts.maxTokens) },
+    );
+  }
+
+  if (openaiShaped) {
     const stream = await openai().responses.create({
       model: opts.model,
       instructions: opts.system,
