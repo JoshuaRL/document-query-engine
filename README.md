@@ -109,6 +109,11 @@ GITHUB_TOKEN=
 ANTHROPIC_API_KEY=sk-ant-...
 OPENAI_API_KEY=
 
+# Or a self-hosted OpenAI-compatible server — see the next section.
+# LLM_BASE_URL=http://localhost:11434/v1
+# LLM_API_KEY=
+# LLM_MODEL=
+
 # MongoDB
 MONGO_URI=mongodb://localhost:27017
 MONGO_DB=workshop
@@ -116,3 +121,29 @@ MONGO_DB=workshop
 # Your GitHub login — treated as "me" / "my" in natural-language queries.
 CALLER_LOGIN=your-github-login
 ```
+
+### Using a self-hosted OpenAI-compatible server
+
+Any server that speaks the OpenAI API works: Ollama, vLLM, LM Studio, llama.cpp's `llama-server`,
+or a company gateway. Set its address, its key if it needs one, and the model to use:
+
+```ini
+LLM_BASE_URL=http://localhost:11434/v1   # Ollama; vLLM is usually :8000/v1, LM Studio :1234/v1, llama-server :8080/v1
+LLM_API_KEY=                             # leave blank if the server doesn't check keys
+LLM_MODEL=qwen3:8b                       # whatever name your server lists under /v1/models
+```
+
+Setting `LLM_BASE_URL` is enough to select this mode; `ANTHROPIC_API_KEY` and `OPENAI_API_KEY`
+are then ignored, and an OpenAI key is never sent to your server. Only `LLM_API_KEY` is.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `LLM_PROVIDER` | inferred | `openai`, `anthropic` or `openai-compatible`, to choose explicitly |
+| `LLM_API` | `chat` (self-hosted), `responses` (OpenAI) | `chat` uses `/v1/chat/completions`, which every compatible server implements; `responses` uses `/v1/responses` |
+| `LLM_SYNTH_MODEL`, `LLM_CHAT_MODEL` | `LLM_MODEL` | a different model for query synthesis and for the chat agent; these also override the OpenAI and Anthropic defaults |
+| `LLM_REASONING` | `auto` | `on` sends reasoning effort (and no temperature) for a reasoning model whose name isn't `gpt-5*` / `o*`; `off` never does |
+
+The model needs to support tool calling, since query synthesis forces a tool call. If a model
+answers in plain text instead, the engine uses the first JSON object in the reply. The chat
+agent's live "thinking" ticker shows reasoning text when the server streams it
+(`reasoning_content` or `reasoning` deltas).
