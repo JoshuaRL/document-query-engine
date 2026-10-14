@@ -17,6 +17,10 @@ export const config = {
   llmChatModel: process.env.LLM_CHAT_MODEL ?? "",
   llmSynthModel: process.env.LLM_SYNTH_MODEL ?? "",
   llmReasoning: process.env.LLM_REASONING ?? "", // auto | on | off
+  llmForceMode: process.env.LLM_FORCE_MODE ?? "", // tool | schema
+  // Ollama's own variables, read when LLM_PROVIDER=ollama.
+  ollamaHost: process.env.OLLAMA_HOST ?? "",
+  ollamaApiKey: process.env.OLLAMA_API_KEY ?? "",
 };
 
 /** Throws if a required env var is missing — call at the top of a CLI that needs it. */

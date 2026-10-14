@@ -22,6 +22,8 @@ export interface ChatCallOpts {
   reasoning: boolean;
   /** Output token cap, already adjusted for reasoning headroom by the caller. */
   maxTokens: number;
+  /** forceTool only: "schema" asks for a JSON-schema response format instead of a forced tool call. */
+  forceMode?: "tool" | "schema";
 }
 
 /** A tool result message (role "tool"). Chat Completions has no error flag, so errors are prefixed. */
@@ -74,17 +76,48 @@ export function extractJsonObject(text: string): Record<string, unknown> | null 
   return null;
 }
 
-let fallbackSeq = 0;
+let syntheticSeq = 0;
 
-/** Forces one tool call; falls back to a JSON object in the reply text if the model ignored tool_choice. */
+/** Records structured output as a tool call in the transcript, so a later tool result references an id that exists. */
+function syntheticCall(toolName: string, input: Record<string, unknown>) {
+  const id = `call_${++syntheticSeq}`;
+  const call: ChatCompletionMessageFunctionToolCall = {
+    id,
+    type: "function",
+    function: { name: toolName, arguments: JSON.stringify(input) },
+  };
+  return { input, toolCallId: id, assistant: [assistantMessage("", [call])] };
+}
+
+/**
+ * Forces one tool call, or with forceMode "schema" asks for the tool's input as a JSON-schema response
+ * format, which servers that ignore tool_choice (Ollama) still enforce. Either way, a JSON object in the
+ * reply text is the fallback when a model answers in prose.
+ */
 export async function forceToolChat(
   client: OpenAI,
   req: { system: string; messages: ChatCompletionMessageParam[]; tool: ChatToolSpec; model: string; temperature?: number },
   opts: ChatCallOpts,
 ): Promise<{ input: unknown; toolCallId: string; assistant: ChatCompletionMessageParam[] }> {
+  const messages: ChatCompletionMessageParam[] = [{ role: "system", content: req.system }, ...req.messages];
+  if (opts.forceMode === "schema") {
+    const res = await client.chat.completions.create({
+      model: req.model,
+      messages,
+      response_format: {
+        type: "json_schema",
+        json_schema: { name: req.tool.name, description: req.tool.description, schema: req.tool.schema },
+      },
+      ...tuning(opts, req.temperature ?? 0),
+    });
+    const input = extractJsonObject(res.choices[0]?.message?.content ?? "");
+    if (!input) throw new Error("Model did not produce a JSON object for the schema.");
+    return syntheticCall(req.tool.name, input);
+  }
+
   const res = await client.chat.completions.create({
     model: req.model,
-    messages: [{ role: "system", content: req.system }, ...req.messages],
+    messages,
     tools: toChatTools([req.tool]),
     tool_choice: { type: "function", function: { name: req.tool.name } },
     ...tuning(opts, req.temperature ?? 0),
@@ -99,14 +132,7 @@ export async function forceToolChat(
 
   const input = extractJsonObject(text);
   if (!input) throw new Error("Model did not produce a tool call.");
-  // Record the recovered call in the transcript, so a later tool result references an id that exists.
-  const id = `call_fallback_${++fallbackSeq}`;
-  const synthetic: ChatCompletionMessageFunctionToolCall = {
-    id,
-    type: "function",
-    function: { name: req.tool.name, arguments: JSON.stringify(input) },
-  };
-  return { input, toolCallId: id, assistant: [assistantMessage("", [synthetic])] };
+  return syntheticCall(req.tool.name, input);
 }
 
 /** Collects streamed deltas into the finished text and tool calls. Exported for tests. */
