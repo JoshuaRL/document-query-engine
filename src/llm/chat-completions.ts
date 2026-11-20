@@ -110,7 +110,12 @@ export async function forceToolChat(
       },
       ...tuning(opts, req.temperature ?? 0),
     });
-    const input = extractJsonObject(res.choices[0]?.message?.content ?? "");
+    const msg = res.choices[0]?.message;
+    // Some models (gpt-oss on Ollama) answer a response format with a tool call they name themselves
+    // and leave content empty, so the call's arguments are the next place to look.
+    const input =
+      extractJsonObject(msg?.content ?? "") ??
+      extractJsonObject((msg?.tool_calls?.[0] as { function?: { arguments?: string } } | undefined)?.function?.arguments ?? "");
     if (!input) throw new Error("Model did not produce a JSON object for the schema.");
     return syntheticCall(req.tool.name, input);
   }

@@ -145,6 +145,18 @@ describe("forceToolChat", () => {
     expect(msg.tool_calls[0]?.function).toEqual({ name: "emit_plan", arguments: '{"limit":4}' });
   });
 
+  it("in schema mode, takes the plan from a tool call when content is empty (gpt-oss on Ollama)", async () => {
+    // Captured from gpt-oss:20b on Ollama 0.40 answering a json_schema request with no tools sent.
+    const { client } = fakeClient({ choices: [{ finish_reason: "tool_calls", message: { role: "assistant", content: "",
+      reasoning: "We need count of open PRs.",
+      tool_calls: [{ id: "call_x7n3j3y4", index: 0, type: "function",
+        function: { name: "execute_mongo_query", arguments: '{"collection":"pull_requests","pipeline":[{"$match":{"state":"open"}}]}' } }] } }] });
+    const r = await forceToolChat(client, { system: "s", messages: [], tool, model: "m" }, { reasoning: false, maxTokens: 10, forceMode: "schema" });
+    expect(r.input).toEqual({ collection: "pull_requests", pipeline: [{ $match: { state: "open" } }] });
+    const msg = r.assistant[0] as { tool_calls: { function: { name: string } }[] };
+    expect(msg.tool_calls[0]?.function.name).toBe("emit_plan");
+  });
+
   it("in schema mode, throws when the reply holds no JSON object", async () => {
     const { client } = fakeClient({ choices: [{ message: { role: "assistant", content: "sorry" } }] });
     await expect(
