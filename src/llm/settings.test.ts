@@ -114,8 +114,10 @@ describe("isReasoningModel", () => {
   it("follows the name check on auto and the override otherwise", () => {
     expect(isReasoningModel("gpt-5.4-mini", "auto")).toBe(true);
     expect(isReasoningModel("o3", "auto")).toBe(true);
-    expect(isReasoningModel("gpt-oss:20b", "auto")).toBe(false);
-    expect(isReasoningModel("gpt-oss:20b", "on")).toBe(true);
+    expect(isReasoningModel("gpt-oss:20b", "auto")).toBe(true);
+    expect(isReasoningModel("openai/gpt-oss-120b", "auto")).toBe(true);
+    expect(isReasoningModel("llama3.1:8b", "auto")).toBe(false);
+    expect(isReasoningModel("llama3.1:8b", "on")).toBe(true);
     expect(isReasoningModel("gpt-5.4-mini", "off")).toBe(false);
   });
 });

@@ -141,7 +141,7 @@ are then ignored, and an OpenAI key is never sent to your server. Only `LLM_API_
 | `LLM_PROVIDER` | inferred | `openai`, `anthropic` or `openai-compatible`, to choose explicitly |
 | `LLM_API` | `chat` (self-hosted), `responses` (OpenAI) | `chat` uses `/v1/chat/completions`, which every compatible server implements; `responses` uses `/v1/responses` |
 | `LLM_SYNTH_MODEL`, `LLM_CHAT_MODEL` | `LLM_MODEL` | a different model for query synthesis and for the chat agent; these also override the OpenAI and Anthropic defaults |
-| `LLM_REASONING` | `auto` | `on` sends reasoning effort (and no temperature) for a reasoning model whose name isn't `gpt-5*` / `o*`; `off` never does |
+| `LLM_REASONING` | `auto` | `on` sends reasoning effort (and no temperature) for a reasoning model whose name isn't `gpt-5*`, `o*` or `gpt-oss`; `off` never does |
 
 The model needs to support tool calling, since query synthesis forces a tool call. If a model
 answers in plain text instead, the engine uses the first JSON object in the reply. The chat

@@ -101,5 +101,5 @@ export function resolveLlmSettings(cfg: LlmConfig): LlmSettings {
 export function isReasoningModel(model: string, mode: ReasoningMode): boolean {
   if (mode === "on") return true;
   if (mode === "off") return false;
-  return /^(gpt-5|o\d)/.test(model);
+  return /(^|\/)(gpt-5|o\d|gpt-oss)/.test(model);
 }
